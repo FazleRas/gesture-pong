@@ -6,8 +6,12 @@ const HEIGHT = 500
 const PADDLE_WIDTH = 12
 const PADDLE_HEIGHT = 90
 const PADDLE_SPEED = 6
+const PADDLE_MARGIN = 24
 const BALL_SIZE = 12
 const BALL_SPEED = 5
+const SERVE_DELAY_MS = 1500
+
+type Phase = 'start' | 'countdown' | 'playing'
 
 interface GameState {
   leftY: number
@@ -19,6 +23,9 @@ interface GameState {
   leftScore: number
   rightScore: number
   keys: Set<string>
+  phase: Phase
+  serveDirection: number
+  serveAt: number
 }
 
 function createInitialState(): GameState {
@@ -27,18 +34,26 @@ function createInitialState(): GameState {
     rightY: HEIGHT / 2 - PADDLE_HEIGHT / 2,
     ballX: WIDTH / 2 - BALL_SIZE / 2,
     ballY: HEIGHT / 2 - BALL_SIZE / 2,
-    ballVX: BALL_SPEED,
-    ballVY: BALL_SPEED * 0.6,
+    ballVX: 0,
+    ballVY: 0,
     leftScore: 0,
     rightScore: 0,
     keys: new Set(),
+    phase: 'start',
+    serveDirection: 1,
+    serveAt: 0,
   }
 }
 
-function resetBall(state: GameState, direction: number) {
+function centerBall(state: GameState) {
   state.ballX = WIDTH / 2 - BALL_SIZE / 2
   state.ballY = HEIGHT / 2 - BALL_SIZE / 2
-  state.ballVX = BALL_SPEED * direction
+  state.ballVX = 0
+  state.ballVY = 0
+}
+
+function serveBall(state: GameState) {
+  state.ballVX = BALL_SPEED * state.serveDirection
   state.ballVY = BALL_SPEED * (Math.random() > 0.5 ? 1 : -1) * 0.6
 }
 
@@ -54,7 +69,14 @@ export default function Pong() {
 
     const state = stateRef.current
 
-    const handleKeyDown = (e: KeyboardEvent) => state.keys.add(e.key)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      state.keys.add(e.key)
+      if (e.key === ' ' && state.phase === 'start') {
+        e.preventDefault()
+        state.phase = 'playing'
+        serveBall(state)
+      }
+    }
     const handleKeyUp = (e: KeyboardEvent) => state.keys.delete(e.key)
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
@@ -73,6 +95,13 @@ export default function Pong() {
       state.leftY = Math.max(0, Math.min(HEIGHT - PADDLE_HEIGHT, state.leftY))
       state.rightY = Math.max(0, Math.min(HEIGHT - PADDLE_HEIGHT, state.rightY))
 
+      if (state.phase === 'countdown' && Date.now() >= state.serveAt) {
+        state.phase = 'playing'
+        serveBall(state)
+      }
+
+      if (state.phase !== 'playing') return
+
       state.ballX += state.ballVX
       state.ballY += state.ballVY
 
@@ -84,33 +113,39 @@ export default function Pong() {
 
       // Left paddle collision
       if (
-        state.ballX <= PADDLE_WIDTH &&
+        state.ballX <= PADDLE_MARGIN + PADDLE_WIDTH &&
         state.ballY + BALL_SIZE >= state.leftY &&
         state.ballY <= state.leftY + PADDLE_HEIGHT &&
         state.ballVX < 0
       ) {
         state.ballVX *= -1.05
-        state.ballX = PADDLE_WIDTH
+        state.ballX = PADDLE_MARGIN + PADDLE_WIDTH
       }
 
       // Right paddle collision
       if (
-        state.ballX + BALL_SIZE >= WIDTH - PADDLE_WIDTH &&
+        state.ballX + BALL_SIZE >= WIDTH - PADDLE_MARGIN - PADDLE_WIDTH &&
         state.ballY + BALL_SIZE >= state.rightY &&
         state.ballY <= state.rightY + PADDLE_HEIGHT &&
         state.ballVX > 0
       ) {
         state.ballVX *= -1.05
-        state.ballX = WIDTH - PADDLE_WIDTH - BALL_SIZE
+        state.ballX = WIDTH - PADDLE_MARGIN - PADDLE_WIDTH - BALL_SIZE
       }
 
       // Scoring
       if (state.ballX < 0) {
         state.rightScore += 1
-        resetBall(state, 1)
+        state.serveDirection = 1
+        centerBall(state)
+        state.phase = 'countdown'
+        state.serveAt = Date.now() + SERVE_DELAY_MS
       } else if (state.ballX > WIDTH) {
         state.leftScore += 1
-        resetBall(state, -1)
+        state.serveDirection = -1
+        centerBall(state)
+        state.phase = 'countdown'
+        state.serveAt = Date.now() + SERVE_DELAY_MS
       }
     }
 
@@ -129,8 +164,8 @@ export default function Pong() {
 
       // Paddles
       ctx.fillStyle = '#c084fc'
-      ctx.fillRect(0, state.leftY, PADDLE_WIDTH, PADDLE_HEIGHT)
-      ctx.fillRect(WIDTH - PADDLE_WIDTH, state.rightY, PADDLE_WIDTH, PADDLE_HEIGHT)
+      ctx.fillRect(PADDLE_MARGIN, state.leftY, PADDLE_WIDTH, PADDLE_HEIGHT)
+      ctx.fillRect(WIDTH - PADDLE_MARGIN - PADDLE_WIDTH, state.rightY, PADDLE_WIDTH, PADDLE_HEIGHT)
 
       // Ball
       ctx.fillStyle = '#f3f4f6'
@@ -142,6 +177,18 @@ export default function Pong() {
       ctx.textAlign = 'center'
       ctx.fillText(String(state.leftScore), WIDTH / 2 - 60, 60)
       ctx.fillText(String(state.rightScore), WIDTH / 2 + 60, 60)
+
+      // Overlay text
+      if (state.phase === 'start') {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+        ctx.font = '28px ui-monospace, monospace'
+        ctx.fillText('Press SPACE to start', WIDTH / 2, HEIGHT / 2 + 60)
+      } else if (state.phase === 'countdown') {
+        const secondsLeft = Math.max(0, Math.ceil((state.serveAt - Date.now()) / 1000))
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+        ctx.font = '28px ui-monospace, monospace'
+        ctx.fillText(secondsLeft > 0 ? String(secondsLeft) : '', WIDTH / 2, HEIGHT / 2 + 60)
+      }
     }
 
     const loop = () => {
